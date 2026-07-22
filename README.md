@@ -3,10 +3,6 @@
 A **lightweight web chat UI for the real antigravity (`agy`) CLI**. No database,
 no auth stack — a single FastAPI process + one static HTML page.
 
-> Not to be confused with `antigravity-cli-proxy` on `:3120`. Despite its name,
-> that service was repurposed (Phase 3) to forward to **OpenRouter** and serves
-> agentmemory. This app talks to the actual `agy` binary.
-
 ## What it does
 
 - Serves a minimal single-page chat at `/`.
