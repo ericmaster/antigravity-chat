@@ -18,6 +18,46 @@ export PORT="${PORT:-3121}"
 export AGY_TIMEOUT="${AGY_TIMEOUT:-300}"
 export AGY_SANDBOX="${AGY_SANDBOX:-0}"
 
+# Check if PORT is currently in use
+_OCCUPIED_PID=""
+if command -v lsof >/dev/null 2>&1; then
+  _OCCUPIED_PID=$(lsof -t -i:"$PORT" 2>/dev/null || true)
+elif command -v fuser >/dev/null 2>&1; then
+  _OCCUPIED_PID=$(fuser "$PORT"/tcp 2>/dev/null | xargs || true)
+fi
+
+if [ -z "$_OCCUPIED_PID" ]; then
+  if ! ./.venv/bin/python -c "import socket, sys; s = socket.socket(); s.bind(('0.0.0.0', int(sys.argv[1])))" "$PORT" 2>/dev/null; then
+    _OCCUPIED_PID="unknown"
+  fi
+fi
+
+if [ -n "$_OCCUPIED_PID" ]; then
+  echo "Port $PORT is currently in use (PID: $_OCCUPIED_PID)."
+  if [ -t 0 ] || [ -t 1 ]; then
+    read -rp "Would you like to kill the process on port $PORT and restart? [y/N] " _REPLY
+    case "$_REPLY" in
+      [yY][eE][sS]|[yY])
+        echo "Stopping process on port $PORT..."
+        if [ "$_OCCUPIED_PID" != "unknown" ]; then
+          kill -9 $_OCCUPIED_PID 2>/dev/null || true
+        elif command -v fuser >/dev/null 2>&1; then
+          fuser -k -9 "$PORT"/tcp 2>/dev/null || true
+        fi
+        sleep 1
+        ;;
+      *)
+        echo "Aborting."
+        exit 1
+        ;;
+    esac
+  else
+    echo "Non-interactive session: cannot prompt to kill process on port $PORT. Aborting." >&2
+    exit 1
+  fi
+fi
+
+
 _CLIENT_ID="${INFISICAL_UNIVERSAL_AUTH_CLIENT_ID:-${INFISICAL_CLIENT_ID:-}}"
 _CLIENT_SECRET="${INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET:-${INFISICAL_CLIENT_SECRET:-}}"
 _DOMAIN="${INFISICAL_HOST_URL:-http://localhost:3080}"
