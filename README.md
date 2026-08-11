@@ -1,18 +1,16 @@
 # antigravity-chat
 
-A **lightweight web chat UI for the real antigravity (`agy`) CLI**. No database,
-no auth stack — a single FastAPI process + one static HTML page.
+A **lightweight web chat UI for the real antigravity (`agy`) CLI**. Simple, responsive, single-file FastAPI backend + single static HTML page.
 
 ## What it does
 
 - Serves a minimal single-page chat at `/`.
-- `POST /api/chat` — SSE stream of the assistant reply, produced by shelling
-  `agy --print --dangerously-skip-permissions` and streaming stdout.
+- `POST /api/chat` — SSE stream of assistant replies using `agy --print --output-format stream-json --dangerously-skip-permissions`.
+- **Token-Level Streaming**: NDJSON stream parsing delivers word-by-word token deltas in real-time.
+- **Stateful Conversations**: Preserves session state and conversation IDs across turns and browser refreshes (`localStorage` & `.antigravity_conversations.json`).
+- **Tool & Usage Metrics**: Visual badges for active tool calls and token usage statistics (`input_tokens` / `output_tokens`).
 - `GET /api/models` — live model list from `agy models` (populates the picker).
-- **Stateless**: the full conversation is re-injected into the prompt each turn,
-  avoiding agy's persistent-workspace context bleed.
-- **Bonus OpenAI-compatible endpoints** (`/v1/chat/completions`, `/v1/models`) so
-  other OpenAI-protocol tools can reuse it — point their `base_url` at this port.
+- **Bonus OpenAI-compatible endpoints** (`/v1/chat/completions`, `/v1/models`) so other OpenAI-protocol tools can reuse it — point their `base_url` at this port.
 
 ## Run
 
@@ -28,12 +26,49 @@ no auth stack — a single FastAPI process + one static HTML page.
 | `AGY_BIN` | `agy` | CLI binary |
 | `AGY_TIMEOUT` | `300` | Max seconds per turn |
 | `AGY_SANDBOX` | `0` | Set `1` to run agy in `--sandbox` (recommended if exposed publicly) |
+| `AGY_OUTPUT_FORMAT` | `stream-json` | Output format for agy (`stream-json` or `text`) |
+| `AGY_PERSIST_CONVERSATIONS` | `true` | Enable conversation persistence across turns |
+| `AGY_CONVERSATIONS_FILE` | `.antigravity_conversations.json` | JSON file storing user conversation mappings |
 | `AGY_SCRATCH` | `./scratch` | Neutral cwd for agy (keeps unrelated repos out of context) |
+
+## Systemd Service (Optional)
+
+You can optionally run `antigravity-chat` as a persistent background service managed by `systemd`.
+
+An example service file is provided in [`antigravity-chat.service.example`](file:///home/ericmaster/agentic/antigravity-chat/antigravity-chat.service.example).
+
+### Setup as a User Service
+
+1. Copy the example service file to your systemd user directory:
+   ```bash
+   mkdir -p ~/.config/systemd/user
+   cp antigravity-chat.service.example ~/.config/systemd/user/antigravity-chat.service
+   ```
+
+2. Edit `~/.config/systemd/user/antigravity-chat.service` to match your installation paths (`WorkingDirectory`, `ExecStart`, `Environment`).
+
+3. Enable and start the service:
+   ```bash
+   systemctl --user daemon-reload
+   systemctl --user enable --now antigravity-chat
+   ```
+
+4. Service management commands:
+   ```bash
+   systemctl --user status antigravity-chat   # Check status
+   systemctl --user restart antigravity-chat  # Restart service
+   systemctl --user stop antigravity-chat     # Stop service
+   journalctl --user -u antigravity-chat -f   # View live logs
+   ```
 
 ## Notes / limits
 
-- `agy --print` has no token-level streaming; output is flushed in chunks, so the
-  UI "types" in bursts rather than per-token.
-- Per-turn latency is whatever `agy` takes (subprocess + model). The `default`
-  model uses agy's configured default; pick a `(Low)` Flash model for speed.
+- Real-time token streaming is enabled when `AGY_OUTPUT_FORMAT=stream-json`.
+- Per-turn latency is whatever `agy` takes (subprocess + model). Pick a `(Low)` Flash model for maximum speed.
 - Uses your antigravity subscription/quota — no API keys needed.
+
+## License
+
+This project is open source and available under the [MIT License](LICENSE).
+
+

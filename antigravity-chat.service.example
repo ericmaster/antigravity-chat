@@ -1,0 +1,15 @@
+[Unit]
+Description=antigravity-chat — agy-backed web chat UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/antigravity-chat
+ExecStart=/path/to/antigravity-chat/start.sh
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target

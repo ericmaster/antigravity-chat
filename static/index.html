@@ -55,14 +55,34 @@
       background: #3ad29f;
     }
 
-    header select {
+    .model-wrap {
       margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    header select {
       background: var(--bg);
       color: var(--text);
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 6px 10px;
       font-size: 13px;
+    }
+
+    .model-spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
     }
 
     header button {
@@ -250,6 +270,43 @@
       border-color: var(--accent);
     }
 
+    /* Conversation ID pill button */
+    .cid-btn {
+      background: var(--bg);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .cid-btn:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    .tool-badge {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(124, 140, 255, 0.12);
+      color: var(--accent);
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+    }
+
+    .token-metrics {
+      margin-top: 6px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
     /* Modal styling */
     .fs-modal-overlay {
       position: fixed;
@@ -409,8 +466,12 @@
   <header>
     <span class="dot"></span>
     <h1>Antigravity Chat</h1>
+    <button id="cid-btn" class="cid-btn" style="display:none;" title="Active Conversation ID">💬 <span id="cid-label"></span></button>
     <button id="ws-btn" class="ws-btn" title="Choose workspace folder">📁 <span id="ws-label">scratch</span></button>
-    <select id="model" title="Model"></select>
+    <div class="model-wrap">
+      <span id="model-spinner" class="model-spinner" title="Loading models…"></span>
+      <select id="model" title="Model" style="display:none;"></select>
+    </div>
     <button id="clear" title="New chat">New chat</button>
   </header>
 
@@ -418,7 +479,7 @@
     <div class="wrap">
       <div class="empty">
         <h2>Antigravity Chat</h2>
-        <p>Powered by the <code>agy</code> CLI. Pick a model and say hello.</p>
+        <p>Powered by the <code>agy</code> CLI with token streaming & conversation state.</p>
       </div>
     </div>
   </div>
@@ -428,7 +489,7 @@
       <textarea id="input" placeholder="Message antigravity…  (Enter to send, Shift+Enter for newline)"></textarea>
       <button class="send" id="send">Send</button>
     </div>
-    <div class="hint" id="hint">Stateless: the full conversation is re-sent each turn.</div>
+    <div class="hint" id="hint">Stateful streaming enabled (stream-json format).</div>
   </footer>
 
   <div id="fs-modal" class="fs-modal-overlay">
@@ -453,11 +514,29 @@
     marked.setOptions({ breaks: true });
     const $ = (s) => document.querySelector(s);
     const chat = $("#chat"), input = $("#input"), sendBtn = $("#send"),
-      modelSel = $("#model"), hint = $("#hint");
-    let messages = [];      // {role, content}
+      modelSel = $("#model"), hint = $("#hint"), cidBtn = $("#cid-btn"), cidLabel = $("#cid-label");
+    let messages = [];      // {role, content, tool, metrics}
     let busy = false;
     let currentCwd = localStorage.getItem("agy_cwd") || "";
+    let currentConversationId = localStorage.getItem("agy_conversation_id") || null;
+    let userId = localStorage.getItem("agy_user_id");
+    if (!userId) {
+      userId = "user_" + Math.random().toString(36).slice(2, 10);
+      localStorage.setItem("agy_user_id", userId);
+    }
     let fsModalPath = "", fsModalEntries = [], fsModalUp = null;
+
+    function updateConversationPill() {
+      if (currentConversationId) {
+        cidLabel.textContent = currentConversationId.length > 12 
+          ? currentConversationId.slice(0, 8) + "…" 
+          : currentConversationId;
+        cidBtn.title = "Conversation ID: " + currentConversationId;
+        cidBtn.style.display = "inline-flex";
+      } else {
+        cidBtn.style.display = "none";
+      }
+    }
 
     function updateWorkspacePill() {
       const label = $("#ws-label");
@@ -549,6 +628,7 @@
 
     $("#ws-btn").onclick = openPicker;
     updateWorkspacePill();
+    updateConversationPill();
 
     function md(text) { return DOMPurify.sanitize(marked.parse(text || "")); }
 
@@ -556,15 +636,17 @@
       const wrap = document.createElement("div");
       wrap.className = "wrap";
       if (messages.length === 0) {
-        chat.innerHTML = `<div class="wrap"><div class="empty"><h2>antigravity chat</h2>
-      <p>Powered by the <code>agy</code> CLI. Pick a model and say hello.</p></div></div>`;
+        chat.innerHTML = `<div class="wrap"><div class="empty"><h2>Antigravity Chat</h2>
+      <p>Powered by the <code>agy</code> CLI with token streaming & conversation state.</p></div></div>`;
         return;
       }
       for (const m of messages) {
         const el = document.createElement("div");
         el.className = "msg " + m.role;
+        let toolHtml = m.tool ? `<div class="tool-badge">🛠️ Tool: ${escapeHtml(m.tool)}</div>` : "";
+        let metricsHtml = m.metrics ? `<div class="token-metrics">📊 Tokens: ${escapeHtml(m.metrics)}</div>` : "";
         el.innerHTML = `<div class="avatar">${m.role === "user" ? "U" : "A"}</div>
-      <div class="body">${m.role === "user" ? escapeHtml(m.content) : md(m.content)}</div>`;
+      <div class="body">${m.role === "user" ? escapeHtml(m.content) : md(m.content)}${toolHtml}${metricsHtml}</div>`;
         wrap.appendChild(el);
       }
       chat.innerHTML = "";
@@ -577,7 +659,22 @@
         .replace(/\n/g, "<br>");
     }
 
+    const modelSpinner = $("#model-spinner");
+
+    function formatModelLabel(key) {
+      // "gemini-2.5-pro-preview-06-05" → "Gemini 2.5 Pro Preview 06-05"
+      return key
+        .replace(/^gemini-/, "Gemini ")
+        .replace(/^claude-/, "Claude ")
+        .replace(/^gpt-/, "GPT-")
+        .replace(/-/g, " ")
+        .replace(/\b(\w)/g, c => c.toUpperCase())
+        .trim();
+    }
+
     async function loadModels() {
+      modelSpinner.style.display = "block";
+      modelSel.style.display = "none";
       const maxRetries = 3;
       const baseDelay = 500;
       for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -589,8 +686,12 @@
               modelSel.innerHTML = "";
               for (const m of models) {
                 const o = document.createElement("option");
-                o.value = m; o.textContent = m; modelSel.appendChild(o);
+                o.value = m;
+                o.textContent = formatModelLabel(m);
+                modelSel.appendChild(o);
               }
+              modelSpinner.style.display = "none";
+              modelSel.style.display = "";
               return;
             }
           }
@@ -601,7 +702,9 @@
           await new Promise(res => setTimeout(res, baseDelay * Math.pow(2, attempt)));
         }
       }
-      modelSel.innerHTML = "<option>default</option>";
+      modelSel.innerHTML = "<option value=\'default\'>Default</option>";
+      modelSpinner.style.display = "none";
+      modelSel.style.display = "";
     }
 
     async function send() {
@@ -618,7 +721,14 @@
       try {
         const resp = await fetch("/api/chat", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: messages.slice(0, -1), model: modelSel.value, cwd: currentCwd || null }),
+          body: JSON.stringify({
+            messages: messages.slice(0, -1),
+            model: modelSel.value,
+            cwd: currentCwd || null,
+            conversation_id: currentConversationId || null,
+            continue_conversation: !!currentConversationId,
+            user_id: userId,
+          }),
         });
         const reader = resp.body.getReader();
         const dec = new TextDecoder();
@@ -632,13 +742,52 @@
           for (const ev of events) {
             const line = ev.split("\n").find(l => l.startsWith("data: "));
             if (!line) continue;
-            const data = JSON.parse(line.slice(6));
-            if (data.delta) {
-              messages[messages.length - 1].content += data.delta;
-              if (bodyEl) { bodyEl.innerHTML = md(messages[messages.length - 1].content); }
-              chat.scrollTop = chat.scrollHeight;
-            } else if (data.error) {
-              messages[messages.length - 1].content += "\n\n_Error: " + data.error + "_";
+            try {
+              const data = JSON.parse(line.slice(6));
+              
+              if (data.event === "init" && data.conversation_id) {
+                currentConversationId = data.conversation_id;
+                localStorage.setItem("agy_conversation_id", currentConversationId);
+                updateConversationPill();
+              } else if (data.event === "delta" || data.delta) {
+                const chunk = data.delta || data.text || "";
+                messages[messages.length - 1].content += chunk;
+                if (bodyEl) bodyEl.innerHTML = md(messages[messages.length - 1].content);
+                chat.scrollTop = chat.scrollHeight;
+              } else if (data.event === "tool" || data.tool) {
+                const toolName = data.tool || data.name || "executing";
+                messages[messages.length - 1].tool = toolName;
+                const msgEl = chat.querySelector(".msg.assistant:last-child .body");
+                if (msgEl) {
+                  let badge = msgEl.querySelector(".tool-badge");
+                  if (!badge) {
+                    badge = document.createElement("div");
+                    badge.className = "tool-badge";
+                    msgEl.appendChild(badge);
+                  }
+                  badge.textContent = "🛠️ Tool: " + toolName;
+                }
+              } else if (data.event === "result" && data.usage) {
+                const u = data.usage;
+                const total = u.total_tokens || ((u.input_tokens || 0) + (u.output_tokens || 0));
+                const textMetrics = `${total} tokens (${u.input_tokens || 0} in / ${u.output_tokens || 0} out)`;
+                messages[messages.length - 1].metrics = textMetrics;
+                const msgEl = chat.querySelector(".msg.assistant:last-child .body");
+                if (msgEl) {
+                  let mBadge = msgEl.querySelector(".token-metrics");
+                  if (!mBadge) {
+                    mBadge = document.createElement("div");
+                    mBadge.className = "token-metrics";
+                    msgEl.appendChild(mBadge);
+                  }
+                  mBadge.textContent = "📊 Tokens: " + textMetrics;
+                }
+              } else if (data.event === "error" || data.error) {
+                messages[messages.length - 1].content += "\n\n_Error: " + (data.error || "Unknown error") + "_";
+                if (bodyEl) bodyEl.innerHTML = md(messages[messages.length - 1].content);
+              }
+            } catch (e) {
+              console.warn("Error parsing event:", e, line);
             }
           }
         }
@@ -651,6 +800,16 @@
       }
     }
 
+    function clearChat() {
+      messages = [];
+      currentConversationId = null;
+      localStorage.removeItem("agy_conversation_id");
+      updateConversationPill();
+      fetch("/api/conversations?user_id=" + encodeURIComponent(userId), { method: "DELETE" }).catch(() => {});
+      render();
+      input.focus();
+    }
+
     sendBtn.onclick = send;
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
@@ -659,7 +818,7 @@
       input.style.height = "60px";
       input.style.height = Math.min(input.scrollHeight, 200) + "px";
     });
-    $("#clear").onclick = () => { messages = []; render(); input.focus(); };
+    $("#clear").onclick = clearChat;
 
     loadModels();
     input.focus();

@@ -5,4 +5,5 @@
 __pycache__/
 *.pyc
 scratch/
+.antigravity_conversations.json
 .DS_Store
