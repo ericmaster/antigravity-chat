@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import codecs
 import json
 import logging
 import os
@@ -20,6 +21,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 logger = logging.getLogger("antigravity-chat")
@@ -46,6 +48,12 @@ AGY_TIMEOUT = int(os.getenv("AGY_TIMEOUT", "300"))  # seconds per turn
 AGY_SANDBOX = os.getenv("AGY_SANDBOX", "0") not in ("0", "false", "")
 AGY_OUTPUT_FORMAT = os.getenv("AGY_OUTPUT_FORMAT", "stream-json")
 AGY_PERSIST_CONVERSATIONS = os.getenv("AGY_PERSIST_CONVERSATIONS", "true").lower() in ("1", "true", "yes")
+AGY_DISABLE_MCP = os.getenv("AGY_DISABLE_MCP", "false").lower() in ("1", "true", "yes")
+AGY_DISABLED_MCP_SERVERS = {
+    name.strip().lower()
+    for name in os.getenv("AGY_DISABLED_MCP_SERVERS", "").split(",")
+    if name.strip()
+}
 CONVERSATIONS_FILE = Path(os.getenv("AGY_CONVERSATIONS_FILE", str(Path(__file__).parent / ".antigravity_conversations.json")))
 
 # Neutral working dir so agy does not pull in unrelated repo context.
@@ -228,8 +236,8 @@ def browse_fs(path: str | None) -> dict:
 BASIC_AUTH_USER = os.getenv("BASIC_AUTH_USER", "")
 BASIC_AUTH_PASS = os.getenv("BASIC_AUTH_PASS", "")
 _AUTH_ENABLED = bool(BASIC_AUTH_USER and BASIC_AUTH_PASS)
-# Paths reachable without credentials (tunnel/Access health checks).
-_AUTH_EXEMPT = {"/healthz"}
+# Paths reachable without credentials (tunnel/Access health checks and favicons).
+_AUTH_EXEMPT = {"/healthz", "/favicon.ico", "/favicon.png"}
 
 
 @app.middleware("http")
@@ -239,21 +247,43 @@ async def _basic_auth(request: Request, call_next):
         ok = False
         if header.startswith("Basic "):
             try:
-                user, _, pw = base64.b64decode(header[6:]).decode().partition(":")
-                ok = secrets.compare_digest(user, BASIC_AUTH_USER) and \
-                    secrets.compare_digest(pw, BASIC_AUTH_PASS)
-            except Exception:  # noqa: BLE001
+                decoded = base64.b64decode(header[6:]).decode("utf-8")
+                user, pass_ = decoded.split(":", 1)
+                ok = secrets.compare_digest(user, BASIC_AUTH_USER) and secrets.compare_digest(pass_, BASIC_AUTH_PASS)
+            except Exception:
                 ok = False
         if not ok:
             return Response(
                 status_code=401,
                 headers={"WWW-Authenticate": 'Basic realm="antigravity-chat"'},
-                content="Authentication required",
+                content="Unauthorized",
             )
     return await call_next(request)
 
 
-_models_cache: tuple[float, list[str]] | None = None
+# --------------------------------------------------------------------------- #
+# Routes
+# --------------------------------------------------------------------------- #
+
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+
+@app.get("/")
+async def index() -> FileResponse:
+    return FileResponse(STATIC / "index.html")
+
+
+@app.api_route("/favicon.ico", methods=["GET", "HEAD"])
+async def favicon() -> FileResponse:
+    return FileResponse(STATIC / "logo.png", media_type="image/png")
+
+
+@app.api_route("/favicon.png", methods=["GET", "HEAD"])
+async def favicon_png() -> FileResponse:
+    return FileResponse(STATIC / "logo.png", media_type="image/png")
+
+
+_models_cache: tuple[float, list[dict[str, str]]] | None = None
 _MODELS_TTL = 300
 
 
@@ -306,12 +336,9 @@ async def _resolve_prompt_and_session(req: ChatRequest) -> tuple[str, str | None
     if AGY_PERSIST_CONVERSATIONS and not cid and req.continue_conversation:
         cid = await get_conversation_id_async(user_id)
 
-    if cid:
+    if cid or req.continue_conversation:
         prompt = req.messages[-1].content if req.messages else ""
-        continue_last = False
-    elif req.continue_conversation:
-        prompt = req.messages[-1].content if req.messages else ""
-        continue_last = True
+        continue_last = not cid and bool(req.continue_conversation)
     else:
         prompt = _render_prompt(req.messages, req.system)
         continue_last = False
@@ -324,12 +351,17 @@ def _build_argv(
     prompt: str = "",
     conversation_id: str | None = None,
     continue_last: bool = False,
+    target_cwd: str | None = None,
 ) -> list[str]:
-    argv = [AGY_BIN, "-p", "--dangerously-skip-permissions"]
+    # agy treats the token after -p as its prompt, even when that token is a flag.
+    # Attach the prompt to -p so permission and output flags cannot be swallowed.
+    argv = [AGY_BIN, "--dangerously-skip-permissions"]
     if AGY_OUTPUT_FORMAT:
         argv += ["--output-format", AGY_OUTPUT_FORMAT]
     if AGY_SANDBOX:
         argv.append("--sandbox")
+    if target_cwd:
+        argv += ["--add-dir", target_cwd]
     if model and model.strip() and model != "default":
         argv += ["--model", model]
     clean_cid = _sanitize_token(conversation_id)
@@ -338,10 +370,67 @@ def _build_argv(
     elif continue_last:
         argv.append("--continue")
     argv += ["--print-timeout", f"{AGY_TIMEOUT}s"]
-    # Append prompt as positional arg — passing via stdin causes timeout on some setups.
     if prompt:
-        argv.append(prompt)
+        argv.append(f"-p={prompt}")
     return argv
+
+
+def _agy_environment() -> dict[str, str]:
+    """Run chat turns with known-stalled MCP servers removed."""
+    env = os.environ.copy()
+    if not AGY_DISABLE_MCP and not AGY_DISABLED_MCP_SERVERS:
+        return env
+
+    source_home = Path(os.path.expanduser("~")).resolve()
+    token_source = source_home / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
+    if not token_source.exists():
+        logger.warning("AGY_DISABLE_MCP is enabled but no agy OAuth token was found; using the current HOME")
+        return env
+
+    runtime_home = Path(os.getenv("AGY_RUNTIME_HOME", str(SCRATCH / ".agy-home"))).expanduser().resolve()
+    if runtime_home == source_home:
+        logger.warning("AGY_RUNTIME_HOME points at HOME; MCP isolation is disabled")
+        return env
+
+    runtime_config = runtime_home / ".gemini" / "config"
+    runtime_config.mkdir(parents=True, exist_ok=True)
+    mcp_config = {"mcpServers": {}}
+    if not AGY_DISABLE_MCP:
+        source_config = source_home / ".gemini" / "config" / "mcp_config.json"
+        try:
+            source_data = json.loads(source_config.read_text())
+            servers = source_data.get("mcpServers", {})
+            if isinstance(servers, dict):
+                mcp_config = {
+                    **source_data,
+                    "mcpServers": {
+                        name: config
+                        for name, config in servers.items()
+                        if name.lower() not in AGY_DISABLED_MCP_SERVERS
+                    },
+                }
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to filter agy MCP config %s: %s", source_config, exc)
+    (runtime_config / "mcp_config.json").write_text(json.dumps(mcp_config, indent=2) + "\n")
+
+    # Reuse the user's token without copying credentials into the runtime directory.
+    runtime_token = runtime_home / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
+    runtime_token.parent.mkdir(parents=True, exist_ok=True)
+    if not runtime_token.is_symlink():
+        if runtime_token.exists():
+            runtime_token.unlink()
+        runtime_token.symlink_to(token_source)
+
+    source_installation_id = source_home / ".gemini" / "antigravity-cli" / "installation_id"
+    if source_installation_id.exists():
+        runtime_installation_id = runtime_home / ".gemini" / "antigravity-cli" / "installation_id"
+        if not runtime_installation_id.is_symlink():
+            if runtime_installation_id.exists():
+                runtime_installation_id.unlink()
+            runtime_installation_id.symlink_to(source_installation_id)
+
+    env["HOME"] = str(runtime_home)
+    return env
 
 
 def _parse_ndjson_line(line_str: str) -> list[dict]:
@@ -351,23 +440,39 @@ def _parse_ndjson_line(line_str: str) -> list[dict]:
         return events
     try:
         obj = json.loads(line_clean)
+        if not isinstance(obj, dict):
+            return [{"event": "delta", "delta": str(obj)}]
+
+        def parse_tool(payload: dict) -> dict:
+            tool_info = payload.get("tool_info")
+            tool_name = payload.get("tool_name") or payload.get("tool") or payload.get("name")
+            args = payload.get("args") or payload.get("input")
+            if isinstance(tool_info, dict):
+                tool_name = tool_name or tool_info.get("name")
+                args = args or tool_info.get("parameters") or tool_info.get("input")
+            return {
+                "event": "tool",
+                "tool": tool_name,
+                "args": args,
+                "status": payload.get("status") or payload.get("state") or "executing",
+            }
+
         ev_type = obj.get("event") or obj.get("type")
-        
+
         if ev_type == "init":
             init_obj = obj.get("init")
             cid = obj.get("conversation_id") or (
                 init_obj.get("conversation_id") if isinstance(init_obj, dict) else None
             )
             events.append({"event": "init", "conversation_id": cid})
-            
+
         elif ev_type in ("tool_call", "tool"):
-            tool_name = obj.get("tool") or obj.get("name") or obj.get("tool_name")
-            args = obj.get("args") or obj.get("input")
-            status = obj.get("status") or "executing"
-            events.append({"event": "tool", "tool": tool_name, "args": args, "status": status})
+            events.append(parse_tool(obj))
 
         elif ev_type == "step_update":
-            step = obj.get("step_update", {})
+            step = obj.get("step_update") or {}
+            if not isinstance(step, dict):
+                return events
             stype = step.get("step_type")
             if stype == "agent_response":
                 delta = step.get("text_delta") or step.get("delta")
@@ -376,22 +481,34 @@ def _parse_ndjson_line(line_str: str) -> list[dict]:
                 thinking = step.get("thinking")
                 if thinking:
                     events.append({"event": "thinking", "thinking": thinking})
-            elif stype in ("tool", "tool_call") or "tool" in step:
-                tool_name = step.get("tool") or step.get("name")
-                args = step.get("args") or step.get("input")
-                status = step.get("status") or "executing"
-                events.append({"event": "tool", "tool": tool_name, "args": args, "status": status})
+                if step.get("usage"):
+                    events.append({"event": "result", "usage": step["usage"], "status": step.get("state") or "completed"})
+            elif stype in ("tool", "tool_call") or any(key in step for key in ("tool", "tool_name", "tool_info")):
+                events.append(parse_tool(step))
             else:
                 delta = step.get("text_delta") or step.get("delta")
                 if delta:
                     events.append({"event": "delta", "delta": delta})
-                    
+
         elif ev_type == "result":
-            res = obj.get("result", {})
+            res = obj.get("result")
+            if not isinstance(res, dict):
+                res = {}
             usage = res.get("usage") or obj.get("usage")
             status = res.get("status") or obj.get("status") or "completed"
-            events.append({"event": "result", "usage": usage, "status": status})
-            
+            response = res.get("response")
+            cid = res.get("conversation_id") or obj.get("conversation_id")
+            result_event = {"event": "result", "usage": usage, "status": status}
+            if response:
+                result_event["response"] = str(response)
+            if cid:
+                result_event["conversation_id"] = cid
+            events.append(result_event)
+            if str(status).upper() not in ("SUCCESS", "COMPLETED", "OK"):
+                error = res.get("error") or obj.get("error") or res.get("response")
+                if error:
+                    events.append({"event": "error", "error": str(error)})
+
         else:
             delta = obj.get("text_delta") or obj.get("delta") or obj.get("text")
             if delta:
@@ -413,15 +530,17 @@ async def _stream_agy(
     user_id: str = "default",
 ):
     """Run agy and yield structured events (dict) as NDJSON or text chunks arrive."""
+    target_cwd = _within_allowed(cwd) if cwd else None
+    if not target_cwd:
+        target_cwd = str(SCRATCH)
+
     argv = _build_argv(
         model,
         prompt=prompt,
         conversation_id=conversation_id,
         continue_last=continue_last,
+        target_cwd=target_cwd,
     )
-    target_cwd = _within_allowed(cwd) if cwd else None
-    if not target_cwd:
-        target_cwd = str(SCRATCH)
 
     proc = await asyncio.create_subprocess_exec(
         *argv,
@@ -429,19 +548,56 @@ async def _stream_agy(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=target_cwd,
+        env=_agy_environment(),
     )
 
     assert proc.stdout is not None
+    assert proc.stderr is not None
     buffered_line = ""
+    stderr_tail = bytearray()
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    deadline = asyncio.get_running_loop().time() + AGY_TIMEOUT if AGY_TIMEOUT > 0 else None
+
+    async def _drain_stderr() -> None:
+        # Must keep reading stderr concurrently with stdout — if the child fills the
+        # pipe buffer and no one reads it, the child blocks on write() and the whole
+        # process (including stdout) deadlocks.
+        assert proc.stderr is not None
+        while True:
+            chunk = await proc.stderr.read(4096)
+            if not chunk:
+                return
+            stderr_tail.extend(chunk)
+            del stderr_tail[:-4000]
+
+    stderr_task = asyncio.create_task(_drain_stderr())
+
+    async def _reap_process() -> None:
+        if proc.returncode is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=1)
+        except (asyncio.TimeoutError, ProcessLookupError):
+            logger.warning("Timed out reaping agy process")
 
     try:
         while True:
-            chunk = await asyncio.wait_for(proc.stdout.read(1024), timeout=AGY_TIMEOUT)
+            read = proc.stdout.read(1024)
+            if deadline is None:
+                chunk = await read
+            else:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError
+                chunk = await asyncio.wait_for(read, timeout=remaining)
             if not chunk:
                 break
-            text = chunk.decode(errors="replace")
+            text = decoder.decode(chunk)
 
-            if AGY_OUTPUT_FORMAT == "stream-json":
+            if AGY_OUTPUT_FORMAT.strip().lower() == "stream-json":
                 buffered_line += text
                 lines = buffered_line.split("\n")
                 buffered_line = lines.pop()
@@ -454,8 +610,12 @@ async def _stream_agy(
             else:
                 yield {"event": "delta", "delta": text}
 
+        text = decoder.decode(b"", final=True)
+        if text:
+            buffered_line += text
+
         if buffered_line and buffered_line.strip():
-            if AGY_OUTPUT_FORMAT == "stream-json":
+            if AGY_OUTPUT_FORMAT.strip().lower() == "stream-json":
                 parsed_events = _parse_ndjson_line(buffered_line)
                 for ev in parsed_events:
                     if ev.get("event") == "init" and ev.get("conversation_id") and AGY_PERSIST_CONVERSATIONS:
@@ -464,21 +624,33 @@ async def _stream_agy(
             else:
                 yield {"event": "delta", "delta": buffered_line}
 
+        if proc.returncode is None:
+            if deadline is None:
+                await proc.wait()
+            else:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError
+                await asyncio.wait_for(proc.wait(), timeout=remaining)
+        if proc.returncode not in (0, None):
+            err_txt = stderr_tail.decode(errors="replace").strip()
+            logger.warning(f"agy exited {proc.returncode}: {err_txt}")
+            yield {"event": "error", "error": err_txt or f"antigravity-chat: agy exited with code {proc.returncode}"}
+
     except asyncio.TimeoutError:
-        proc.kill()
-        yield {"event": "error", "error": f"antigravity-chat: timed out after {AGY_TIMEOUT}s"}
+        if proc.returncode is None:
+            proc.kill()
+        err_txt = stderr_tail.decode(errors="replace").strip()
+        detail = f" — {err_txt}" if err_txt else ""
+        yield {"event": "error", "error": f"antigravity-chat: timed out after {AGY_TIMEOUT}s{detail}"}
         return
     finally:
-        await proc.wait()
-
-
-# --------------------------------------------------------------------------- #
-# Routes
-# --------------------------------------------------------------------------- #
-
-@app.get("/")
-async def index() -> FileResponse:
-    return FileResponse(STATIC / "index.html")
+        stderr_task.cancel()
+        try:
+            await stderr_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        await _reap_process()
 
 
 @app.get("/healthz")
@@ -521,25 +693,32 @@ async def models() -> dict:
     
     max_retries = 3
     base_delay = 0.5
-    names: list[str] = []
-    
+    names: list[dict] = []
+
     for attempt in range(max_retries):
         try:
             proc = await asyncio.create_subprocess_exec(
                 AGY_BIN, "models",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=_agy_environment(),
             )
             out, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-            names = [ln.strip() for ln in out.decode().splitlines() if ln.strip()]
+            names = []
+            for ln in out.decode().splitlines():
+                ln = ln.strip()
+                if not ln:
+                    continue
+                model_id, _, label = ln.partition("\t")
+                names.append({"id": model_id.strip(), "name": label.strip() or model_id.strip()})
             if names:
                 break
         except Exception:
             names = []
-        
+
         if attempt < max_retries - 1:
             await asyncio.sleep(base_delay * (2 ** attempt))
-    
+
     if names:
         _models_cache = (now, names)
     return {"models": names}
@@ -569,7 +748,15 @@ async def chat(req: ChatRequest):
             yield f"data: {json.dumps({'event': 'error', 'error': str(exc)})}\n\n"
         yield f"data: {json.dumps({'event': 'done'})}\n\n"
 
-    return StreamingResponse(event_gen(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # --- Bonus: OpenAI-compatible endpoint so other tools can reuse this too ----- #
@@ -593,6 +780,8 @@ async def openai_chat(req: ChatRequest) -> JSONResponse:
     ):
         if ev.get("event") == "delta" and ev.get("delta"):
             parts.append(ev["delta"])
+        elif ev.get("event") == "result" and not parts and ev.get("response"):
+            parts.append(ev["response"])
         elif ev.get("event") == "error" and ev.get("error"):
             error_msg = ev["error"]
 
@@ -619,7 +808,7 @@ async def openai_models() -> JSONResponse:
     now = int(time.time())
     return JSONResponse({
         "object": "list",
-        "data": [{"id": n, "object": "model", "created": now, "owned_by": "antigravity"}
+        "data": [{"id": n["id"], "object": "model", "created": now, "owned_by": "antigravity"}
                  for n in m["models"]] or [{"id": "agy", "object": "model",
                                              "created": now, "owned_by": "antigravity"}],
     })

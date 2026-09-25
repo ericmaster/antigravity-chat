@@ -3,8 +3,10 @@
 
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>antigravity chat</title>
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="alternate icon" href="/favicon.ico" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
   <style>
@@ -16,20 +18,34 @@
       --muted: #8b93a7;
       --accent: #7c8cff;
       --user: #1d2535;
+      --success: #3ad29f;
+      --danger: #f87171;
     }
 
     * {
       box-sizing: border-box;
     }
 
+    html {
+      height: 100%;
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+    }
+
     body {
       margin: 0;
+      position: fixed;
+      inset: 0;
       height: 100vh;
+      height: 100dvh;
       display: flex;
       flex-direction: column;
       background: var(--bg);
       color: var(--text);
       font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      overflow: hidden;
+      overscroll-behavior: none;
+      touch-action: pan-y;
     }
 
     header {
@@ -37,8 +53,36 @@
       align-items: center;
       gap: 12px;
       padding: 10px 16px;
+      padding-top: max(10px, env(safe-area-inset-top));
       border-bottom: 1px solid var(--border);
       background: var(--panel);
+      position: sticky;
+      top: 0;
+      flex-shrink: 0;
+      z-index: 10;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      margin-left: auto;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .brand-logo {
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      display: block;
+      flex-shrink: 0;
     }
 
     header h1 {
@@ -46,20 +90,37 @@
       margin: 0;
       font-weight: 600;
       letter-spacing: .2px;
+      white-space: nowrap;
     }
 
     header .dot {
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: #3ad29f;
+      background: var(--success);
+      flex-shrink: 0;
+      transition: background .2s ease, box-shadow .2s ease;
+    }
+
+    header .dot.busy {
+      background: var(--accent);
+      box-shadow: 0 0 0 4px rgba(124, 140, 255, .14);
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    header .dot.error {
+      background: var(--danger);
+    }
+
+    @keyframes pulse {
+      50% { opacity: .45; }
     }
 
     .model-wrap {
-      margin-left: auto;
       display: flex;
       align-items: center;
       gap: 6px;
+      min-width: 0;
     }
 
     header select {
@@ -68,7 +129,10 @@
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 6px 10px;
-      font-size: 13px;
+      font-size: 16px;
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .model-spinner {
@@ -93,12 +157,26 @@
       padding: 6px 10px;
       font-size: 13px;
       cursor: pointer;
+      white-space: nowrap;
+    }
+
+    header button:focus-visible,
+    header select:focus-visible,
+    textarea:focus-visible,
+    .send:focus-visible,
+    .fs-btn-cancel:focus-visible,
+    .fs-btn-select:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }
 
     #chat {
       flex: 1;
+      min-height: 0;
       overflow-y: auto;
+      overscroll-behavior-y: contain;
       padding: 24px 0;
+      -webkit-overflow-scrolling: touch;
     }
 
     .wrap {
@@ -183,6 +261,13 @@
       border-top: 1px solid var(--border);
       background: var(--panel);
       padding: 12px 0;
+      padding-bottom: max(12px, env(safe-area-inset-bottom));
+      position: sticky;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      flex-shrink: 0;
     }
 
     .composer {
@@ -202,6 +287,7 @@
       border-radius: 10px;
       padding: 13px 14px;
       font: inherit;
+      font-size: 16px;
       line-height: 1.5;
       max-height: 240px;
       min-height: 60px;
@@ -221,6 +307,13 @@
       font-weight: 600;
       cursor: pointer;
       font-size: 14px;
+      min-width: 68px;
+      transition: background .2s ease, opacity .2s ease;
+    }
+
+    .send.stop {
+      background: var(--danger);
+      color: #210b0b;
     }
 
     .send:disabled {
@@ -234,6 +327,19 @@
       padding: 0 16px;
       color: var(--muted);
       font-size: 12px;
+      transition: color .2s ease;
+    }
+
+    .hint[data-state="busy"] {
+      color: var(--accent);
+    }
+
+    .hint[data-state="error"] {
+      color: var(--danger);
+    }
+
+    .hint[data-state="ready"] {
+      color: var(--success);
     }
 
     .empty {
@@ -245,6 +351,18 @@
     .empty h2 {
       color: var(--text);
       font-weight: 600;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
     }
 
     /* Workspace picker button */
@@ -263,7 +381,6 @@
       overflow: hidden;
       white-space: nowrap;
       text-overflow: ellipsis;
-      margin-left: auto;
     }
 
     .ws-btn:hover {
@@ -459,83 +576,253 @@
       opacity: 0.5;
       cursor: default;
     }
+
+    .empty-logo {
+      width: 64px;
+      height: 64px;
+      margin-bottom: 12px;
+      filter: drop-shadow(0 4px 16px rgba(124, 140, 255, 0.35));
+    }
+
+    /* Mobile Responsiveness */
+    @media (max-width: 640px) {
+      header {
+        padding: 8px 10px;
+        gap: 6px;
+      }
+
+      .brand {
+        gap: 6px;
+        min-width: 0;
+      }
+
+      .brand-logo {
+        width: 24px;
+        height: 24px;
+      }
+
+      header h1 {
+        font-size: 14px;
+      }
+
+      .ws-btn {
+        max-width: 110px;
+        font-size: 12px;
+        padding: 5px 8px;
+      }
+
+      .cid-btn {
+        max-width: 90px;
+        font-size: 11px;
+        padding: 5px 8px;
+      }
+
+      header select {
+        max-width: 125px;
+        padding: 5px 8px;
+      }
+
+      header button {
+        font-size: 12px;
+        padding: 5px 8px;
+      }
+
+      #chat {
+        padding: 14px 0;
+      }
+
+      .wrap {
+        padding: 0 12px;
+      }
+
+      .composer {
+        padding: 0 10px;
+        gap: 8px;
+      }
+
+      textarea {
+        font-size: 16px;
+        padding: 10px 12px;
+        min-height: 48px;
+        max-height: 140px;
+      }
+
+      .send {
+        padding: 0 14px;
+        font-size: 13px;
+        min-height: 48px;
+      }
+
+      .header-actions {
+        gap: 4px;
+      }
+
+      .hint {
+        padding: 0 10px;
+        font-size: 11px;
+      }
+
+      .msg {
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+
+      .msg .avatar {
+        width: 26px;
+        height: 26px;
+        flex: 0 0 26px;
+        font-size: 12px;
+      }
+
+      .msg .body pre {
+        padding: 10px;
+        font-size: 12px;
+      }
+
+      .empty-logo {
+        width: 48px;
+        height: 48px;
+      }
+
+      .empty h2 {
+        font-size: 18px;
+      }
+    }
+
+    @media (max-width: 420px) {
+      header h1 {
+        display: none;
+      }
+      .ws-btn {
+        max-width: 76px;
+      }
+      header select {
+        max-width: 76px;
+      }
+
+      .cid-btn {
+        width: 30px;
+        max-width: 30px;
+        padding: 5px 6px;
+        overflow: hidden;
+      }
+
+      .cid-btn span {
+        display: none;
+      }
+
+      #clear {
+        width: 30px;
+        padding: 5px 6px;
+        font-size: 0;
+      }
+
+      #clear::after {
+        content: "+";
+        font-size: 17px;
+        line-height: 1;
+      }
+
+      .header-actions {
+        flex: 1;
+        justify-content: flex-end;
+      }
+    }
   </style>
 </head>
 
 <body>
   <header>
-    <span class="dot"></span>
-    <h1>Antigravity Chat</h1>
-    <button id="cid-btn" class="cid-btn" style="display:none;" title="Active Conversation ID">💬 <span id="cid-label"></span></button>
-    <button id="ws-btn" class="ws-btn" title="Choose workspace folder">📁 <span id="ws-label">scratch</span></button>
-    <div class="model-wrap">
-      <span id="model-spinner" class="model-spinner" title="Loading models…"></span>
-      <select id="model" title="Model" style="display:none;"></select>
+    <div class="brand">
+      <img src="/static/logo.png" alt="Antigravity Logo" class="brand-logo" />
+      <span id="status-dot" class="dot" title="Status: Ready"></span>
+      <h1>Antigravity Chat</h1>
     </div>
-    <button id="clear" title="New chat">New chat</button>
+    <div class="header-actions">
+      <button id="cid-btn" class="cid-btn" style="display:none;" title="Active Conversation ID" aria-label="Active conversation">💬 <span id="cid-label"></span></button>
+      <button id="ws-btn" class="ws-btn" title="Choose workspace folder" aria-label="Choose workspace folder">📁 <span id="ws-label">scratch</span></button>
+      <div class="model-wrap">
+        <span id="model-spinner" class="model-spinner" title="Loading models…" aria-label="Loading models"></span>
+        <label class="sr-only" for="model">Model</label>
+        <select id="model" title="Model" aria-label="Model" style="display:none;"></select>
+      </div>
+      <button id="clear" title="New chat" aria-label="Start a new chat">New chat</button>
+    </div>
   </header>
 
-  <div id="chat">
+  <main id="chat" role="log" aria-label="Conversation">
     <div class="wrap">
       <div class="empty">
+        <img src="/static/logo.png" alt="Antigravity Logo" class="empty-logo" />
         <h2>Antigravity Chat</h2>
         <p>Powered by the <code>agy</code> CLI with token streaming & conversation state.</p>
       </div>
     </div>
-  </div>
+  </main>
 
   <footer>
     <div class="composer">
-      <textarea id="input" placeholder="Message antigravity…  (Enter to send, Shift+Enter for newline)"></textarea>
-      <button class="send" id="send">Send</button>
+      <label class="sr-only" for="input">Message</label>
+      <textarea id="input" aria-describedby="hint" placeholder="Message antigravity…  (Enter to send, Shift+Enter for newline)"></textarea>
+      <button class="send" id="send" type="button">Send</button>
     </div>
-    <div class="hint" id="hint">Stateful streaming enabled (stream-json format).</div>
+    <div class="hint" id="hint" data-state="ready" role="status" aria-live="polite">Ready · streaming via agy</div>
   </footer>
 
-  <div id="fs-modal" class="fs-modal-overlay">
+  <div id="fs-modal" class="fs-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="fs-modal-title">
     <div class="fs-modal-card">
       <div class="fs-modal-header">
-        <h3>Workspace Folder Picker</h3>
-        <button class="fs-btn-cancel" onclick="closePicker()">✕</button>
+        <h3 id="fs-modal-title">Workspace Folder Picker</h3>
+        <button class="fs-btn-cancel" type="button" aria-label="Close folder picker" onclick="closePicker()">✕</button>
       </div>
       <div id="fs-modal-path" class="fs-modal-path">(workspace roots)</div>
       <div id="fs-modal-list" class="fs-modal-list"></div>
       <div class="fs-modal-footer">
         <span class="fs-hint">Click a folder to enter · "Open this folder" selects current</span>
         <div class="fs-actions">
-          <button class="fs-btn-cancel" onclick="closePicker()">Cancel</button>
-          <button class="fs-btn-select" id="fs-modal-open" onclick="pickHere()">Open this folder ✓</button>
+          <button class="fs-btn-cancel" type="button" onclick="closePicker()">Cancel</button>
+          <button class="fs-btn-select" id="fs-modal-open" type="button" onclick="pickHere()">Open this folder ✓</button>
         </div>
       </div>
     </div>
   </div>
 
   <script>
-    marked.setOptions({ breaks: true });
+    if (window.marked) marked.setOptions({ breaks: true });
     const $ = (s) => document.querySelector(s);
     const chat = $("#chat"), input = $("#input"), sendBtn = $("#send"),
-      modelSel = $("#model"), hint = $("#hint"), cidBtn = $("#cid-btn"), cidLabel = $("#cid-label");
-    let messages = [];      // {role, content, tool, metrics}
+      modelSel = $("#model"), hint = $("#hint"), cidBtn = $("#cid-btn"), cidLabel = $("#cid-label"),
+      statusDot = $("#status-dot");
+    let messages = [];      // {role, content, tool, metrics, status}
     let busy = false;
+    let activeController = null;
     let currentCwd = localStorage.getItem("agy_cwd") || "";
-    let currentConversationId = localStorage.getItem("agy_conversation_id") || null;
+    const urlConversationId = new URLSearchParams(location.search).get("cid");
+    let currentConversationId = urlConversationId || localStorage.getItem("agy_conversation_id") || null;
     let userId = localStorage.getItem("agy_user_id");
     if (!userId) {
       userId = "user_" + Math.random().toString(36).slice(2, 10);
       localStorage.setItem("agy_user_id", userId);
     }
-    let fsModalPath = "", fsModalEntries = [], fsModalUp = null;
+    let fsModalPath = "", fsModalEntries = [], fsModalUp = null, pickerReturnFocus = null;
 
     function updateConversationPill() {
       if (currentConversationId) {
-        cidLabel.textContent = currentConversationId.length > 12 
-          ? currentConversationId.slice(0, 8) + "…" 
+        cidLabel.textContent = currentConversationId.length > 12
+          ? currentConversationId.slice(0, 8) + "…"
           : currentConversationId;
         cidBtn.title = "Conversation ID: " + currentConversationId;
         cidBtn.style.display = "inline-flex";
       } else {
         cidBtn.style.display = "none";
       }
+      const url = new URL(location.href);
+      if (currentConversationId) {
+        url.searchParams.set("cid", currentConversationId);
+      } else {
+        url.searchParams.delete("cid");
+      }
+      history.replaceState(null, "", url);
     }
 
     function updateWorkspacePill() {
@@ -557,13 +844,25 @@
       }
     }
 
+    function setStatus(text, state = "ready") {
+      hint.textContent = text;
+      hint.dataset.state = state;
+      statusDot.className = "dot" + (state === "busy" ? " busy" : state === "error" ? " error" : "");
+      statusDot.title = state === "busy" ? "Status: Streaming" : state === "error" ? "Status: Error" : "Status: Ready";
+    }
+
     function openPicker() {
-      $("#fs-modal").style.display = "flex";
+      const modal = $("#fs-modal");
+      pickerReturnFocus = document.activeElement;
+      modal.style.display = "flex";
+      requestAnimationFrame(() => modal.querySelector(".fs-btn-cancel")?.focus());
       browseModal(currentCwd || "");
     }
 
     function closePicker() {
       $("#fs-modal").style.display = "none";
+      if (pickerReturnFocus && typeof pickerReturnFocus.focus === "function") pickerReturnFocus.focus();
+      pickerReturnFocus = null;
     }
 
     async function browseModal(path) {
@@ -627,17 +926,35 @@
     }
 
     $("#ws-btn").onclick = openPicker;
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && $("#fs-modal").style.display === "flex") closePicker();
+    });
     updateWorkspacePill();
     updateConversationPill();
 
-    function md(text) { return DOMPurify.sanitize(marked.parse(text || "")); }
+    function md(text) {
+      if (!window.DOMPurify) return escapeHtml(text || "");
+      const raw = window.marked ? window.marked.parse(text || "") : escapeHtml(text || "");
+      return DOMPurify.sanitize(raw);
+    }
 
-    function render() {
+    function isNearBottom() {
+      return chat.scrollHeight - chat.scrollTop - chat.clientHeight < 120;
+    }
+
+    function scrollToBottom(force = false) {
+      if (force || isNearBottom()) {
+        requestAnimationFrame(() => { chat.scrollTop = chat.scrollHeight; });
+      }
+    }
+
+    function render(forceScroll = false) {
+      const stickToBottom = forceScroll || isNearBottom();
       const wrap = document.createElement("div");
       wrap.className = "wrap";
       if (messages.length === 0) {
-        chat.innerHTML = `<div class="wrap"><div class="empty"><h2>Antigravity Chat</h2>
-      <p>Powered by the <code>agy</code> CLI with token streaming & conversation state.</p></div></div>`;
+        chat.innerHTML = `<div class="wrap"><div class="empty"><img src="/static/logo.png" alt="Antigravity Logo" class="empty-logo" /><h2>Antigravity Chat</h2>
+       <p>Powered by the <code>agy</code> CLI with token streaming & conversation state.</p></div></div>`;
         return;
       }
       for (const m of messages) {
@@ -645,32 +962,22 @@
         el.className = "msg " + m.role;
         let toolHtml = m.tool ? `<div class="tool-badge">🛠️ Tool: ${escapeHtml(m.tool)}</div>` : "";
         let metricsHtml = m.metrics ? `<div class="token-metrics">📊 Tokens: ${escapeHtml(m.metrics)}</div>` : "";
+        const live = m.role === "assistant" ? ' aria-live="polite"' : "";
         el.innerHTML = `<div class="avatar">${m.role === "user" ? "U" : "A"}</div>
-      <div class="body">${m.role === "user" ? escapeHtml(m.content) : md(m.content)}${toolHtml}${metricsHtml}</div>`;
+      <div class="body"${live}>${m.role === "user" ? escapeHtml(m.content) : md(m.content)}${toolHtml}${metricsHtml}</div>`;
         wrap.appendChild(el);
       }
       chat.innerHTML = "";
       chat.appendChild(wrap);
-      chat.scrollTop = chat.scrollHeight;
+      if (stickToBottom) scrollToBottom(true);
     }
 
     function escapeHtml(s) {
-      return s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]))
+      return String(s ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]))
         .replace(/\n/g, "<br>");
     }
 
     const modelSpinner = $("#model-spinner");
-
-    function formatModelLabel(key) {
-      // "gemini-2.5-pro-preview-06-05" → "Gemini 2.5 Pro Preview 06-05"
-      return key
-        .replace(/^gemini-/, "Gemini ")
-        .replace(/^claude-/, "Claude ")
-        .replace(/^gpt-/, "GPT-")
-        .replace(/-/g, " ")
-        .replace(/\b(\w)/g, c => c.toUpperCase())
-        .trim();
-    }
 
     async function loadModels() {
       modelSpinner.style.display = "block";
@@ -686,8 +993,8 @@
               modelSel.innerHTML = "";
               for (const m of models) {
                 const o = document.createElement("option");
-                o.value = m;
-                o.textContent = formatModelLabel(m);
+                o.value = m.id;
+                o.textContent = m.name;
                 modelSel.appendChild(o);
               }
               modelSpinner.style.display = "none";
@@ -707,14 +1014,103 @@
       modelSel.style.display = "";
     }
 
+    function updateComposer() {
+      sendBtn.textContent = busy ? "Stop" : "Send";
+      sendBtn.classList.toggle("stop", busy);
+      sendBtn.setAttribute("aria-label", busy ? "Stop response" : "Send message");
+      sendBtn.disabled = false;
+    }
+
+    function appendError(message, label, detail) {
+      const text = `_${label}: ${detail || "Unknown error"}_`;
+      if (!message.content.includes(text)) message.content += `\n\n${text}`;
+    }
+
+    function refreshAssistantBody(message, bodyEl) {
+      if (!bodyEl) return;
+      bodyEl.innerHTML = md(message.content);
+      if (message.tool) {
+        const badge = document.createElement("div");
+        badge.className = "tool-badge";
+        badge.textContent = "🛠️ Tool: " + message.tool;
+        bodyEl.appendChild(badge);
+      }
+      if (message.metrics) {
+        const badge = document.createElement("div");
+        badge.className = "token-metrics";
+        badge.textContent = "📊 Tokens: " + message.metrics;
+        bodyEl.appendChild(badge);
+      }
+    }
+
+    function handleStreamEvent(data, assistant, bodyEl) {
+      if (!data || data.event === "done") return;
+
+      if (data.event === "start") {
+        setStatus("Starting agy…", "busy");
+      } else if (data.event === "init" && data.conversation_id) {
+        currentConversationId = data.conversation_id;
+        localStorage.setItem("agy_conversation_id", currentConversationId);
+        updateConversationPill();
+      } else if (data.event === "delta" || data.delta) {
+        const chunk = data.delta || data.text || "";
+        if (!chunk) return;
+        assistant.content += String(chunk);
+        assistant.status = "streaming";
+        refreshAssistantBody(assistant, bodyEl);
+        setStatus("Streaming response…", "busy");
+        scrollToBottom();
+      } else if (data.event === "thinking") {
+        setStatus("Thinking…", "busy");
+      } else if (data.event === "tool" || data.tool) {
+        const toolName = data.tool || data.name || "executing";
+        assistant.tool = toolName;
+        setStatus(`Using ${toolName}…`, "busy");
+        refreshAssistantBody(assistant, bodyEl);
+      } else if (data.event === "result") {
+        if (!assistant.content && data.response) {
+          assistant.content = String(data.response);
+        }
+        if (data.usage) {
+          const u = data.usage;
+          const total = u.total_tokens ?? ((u.input_tokens || 0) + (u.output_tokens || 0));
+          assistant.metrics = `${total} tokens (${u.input_tokens || 0} in / ${u.output_tokens || 0} out)`;
+        }
+        refreshAssistantBody(assistant, bodyEl);
+        setStatus("Finishing…", "busy");
+      } else if (data.event === "error" || data.error) {
+        assistant.status = "error";
+        appendError(assistant, "Error", data.error);
+        refreshAssistantBody(assistant, bodyEl);
+        setStatus("Request failed", "error");
+      }
+    }
+
+    function handleSseBlock(block, assistant, bodyEl) {
+      const line = block.split(/\r?\n/).find((value) => value.startsWith("data:"));
+      if (!line) return;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === "[DONE]") return;
+      try {
+        handleStreamEvent(JSON.parse(payload), assistant, bodyEl);
+      } catch (e) {
+        console.warn("Error parsing stream event", e);
+      }
+    }
+
     async function send() {
       const text = input.value.trim();
       if (!text || busy) return;
-      busy = true; sendBtn.disabled = true;
+      busy = true;
+      activeController = new AbortController();
+      updateComposer();
+      setStatus("Starting…", "busy");
       messages.push({ role: "user", content: text });
       input.value = ""; input.style.height = "60px";
-      messages.push({ role: "assistant", content: "" });
-      render();
+      const assistant = { role: "assistant", content: "", status: "streaming" };
+      messages.push(assistant);
+      const requestMessages = messages.slice(0, -1).map(({ role, content }) => ({ role, content }));
+      render(true);
       const bodyEl = chat.querySelector(".msg.assistant:last-child .body");
       if (bodyEl) bodyEl.classList.add("cursor");
 
@@ -722,14 +1118,20 @@
         const resp = await fetch("/api/chat", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            messages: messages.slice(0, -1),
-            model: modelSel.value,
+            messages: requestMessages,
+            model: modelSel.value || "default",
             cwd: currentCwd || null,
             conversation_id: currentConversationId || null,
             continue_conversation: !!currentConversationId,
             user_id: userId,
           }),
+          signal: activeController.signal,
         });
+        if (!resp.ok) {
+          const detail = await resp.text().catch(() => "");
+          throw new Error(detail || `Request failed (${resp.status})`);
+        }
+        if (!resp.body) throw new Error("Server returned no response stream");
         const reader = resp.body.getReader();
         const dec = new TextDecoder();
         let buf = "";
@@ -737,70 +1139,42 @@
           const { value, done } = await reader.read();
           if (done) break;
           buf += dec.decode(value, { stream: true });
-          const events = buf.split("\n\n");
+          const events = buf.split(/\r?\n\r?\n/);
           buf = events.pop();
-          for (const ev of events) {
-            const line = ev.split("\n").find(l => l.startsWith("data: "));
-            if (!line) continue;
-            try {
-              const data = JSON.parse(line.slice(6));
-              
-              if (data.event === "init" && data.conversation_id) {
-                currentConversationId = data.conversation_id;
-                localStorage.setItem("agy_conversation_id", currentConversationId);
-                updateConversationPill();
-              } else if (data.event === "delta" || data.delta) {
-                const chunk = data.delta || data.text || "";
-                messages[messages.length - 1].content += chunk;
-                if (bodyEl) bodyEl.innerHTML = md(messages[messages.length - 1].content);
-                chat.scrollTop = chat.scrollHeight;
-              } else if (data.event === "tool" || data.tool) {
-                const toolName = data.tool || data.name || "executing";
-                messages[messages.length - 1].tool = toolName;
-                const msgEl = chat.querySelector(".msg.assistant:last-child .body");
-                if (msgEl) {
-                  let badge = msgEl.querySelector(".tool-badge");
-                  if (!badge) {
-                    badge = document.createElement("div");
-                    badge.className = "tool-badge";
-                    msgEl.appendChild(badge);
-                  }
-                  badge.textContent = "🛠️ Tool: " + toolName;
-                }
-              } else if (data.event === "result" && data.usage) {
-                const u = data.usage;
-                const total = u.total_tokens || ((u.input_tokens || 0) + (u.output_tokens || 0));
-                const textMetrics = `${total} tokens (${u.input_tokens || 0} in / ${u.output_tokens || 0} out)`;
-                messages[messages.length - 1].metrics = textMetrics;
-                const msgEl = chat.querySelector(".msg.assistant:last-child .body");
-                if (msgEl) {
-                  let mBadge = msgEl.querySelector(".token-metrics");
-                  if (!mBadge) {
-                    mBadge = document.createElement("div");
-                    mBadge.className = "token-metrics";
-                    msgEl.appendChild(mBadge);
-                  }
-                  mBadge.textContent = "📊 Tokens: " + textMetrics;
-                }
-              } else if (data.event === "error" || data.error) {
-                messages[messages.length - 1].content += "\n\n_Error: " + (data.error || "Unknown error") + "_";
-                if (bodyEl) bodyEl.innerHTML = md(messages[messages.length - 1].content);
-              }
-            } catch (e) {
-              console.warn("Error parsing event:", e, line);
-            }
-          }
+          for (const ev of events) handleSseBlock(ev, assistant, bodyEl);
+        }
+        buf += dec.decode();
+        if (buf.trim()) {
+          handleSseBlock(buf, assistant, bodyEl);
         }
       } catch (e) {
-        messages[messages.length - 1].content += "\n\n_Connection error: " + e.message + "_";
+        if (e.name === "AbortError") {
+          assistant.status = "stopped";
+          appendError(assistant, "Stopped", "Response cancelled");
+          setStatus("Response stopped", "ready");
+        } else {
+          assistant.status = "error";
+          appendError(assistant, "Connection error", e.message);
+          setStatus("Connection error", "error");
+        }
       } finally {
         if (bodyEl) bodyEl.classList.remove("cursor");
+        if (assistant.status === "streaming") assistant.status = "complete";
+        activeController = null;
+        busy = false;
+        updateComposer();
+        if (assistant.status === "complete") setStatus("Ready · streaming via agy", "ready");
         render();
-        busy = false; sendBtn.disabled = false; input.focus();
+        input.focus();
       }
     }
 
+    function stop() {
+      if (activeController) activeController.abort();
+    }
+
     function clearChat() {
+      if (busy) stop();
       messages = [];
       currentConversationId = null;
       localStorage.removeItem("agy_conversation_id");
@@ -810,7 +1184,7 @@
       input.focus();
     }
 
-    sendBtn.onclick = send;
+    sendBtn.onclick = () => (busy ? stop() : send());
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
     });

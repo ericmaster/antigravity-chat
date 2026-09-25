@@ -9,7 +9,7 @@ Repository guidelines and instructions for AI coding agents.
 - **Backend**: FastAPI (`app.py`), Python 3.x
 - **Frontend**: Single-page static HTML/JS (`static/index.html`)
 - **Server Entrypoint**: `./start.sh` (runs Uvicorn on port `3121` by default)
-- **Background Daemon (Optional)**: Can run as an optional systemd user service (`~/.config/systemd/user/antigravity-chat.service`, see template [`antigravity-chat.service.example`](file:///home/ericmaster/agentic/antigravity-chat/antigravity-chat.service.example)). Managed via `systemctl --user {status|restart|stop|start} antigravity-chat`.
+- **Background Daemon (Optional)**: Can run as an optional systemd user service (`~/.config/systemd/user/antigravity-chat.service`, see template [`antigravity-chat.service.example`](antigravity-chat.service.example)). Managed via `systemctl --user {status|restart|stop|start} antigravity-chat`.
 
 ## Key Technical Conventions
 
@@ -24,4 +24,3 @@ Repository guidelines and instructions for AI coding agents.
 - Keep the architecture simple and database-free.
 - Maintain compatibility for OpenAI-style endpoints (`/v1/chat/completions`, `/v1/models`).
 - Ensure frontend assets in `static/` remain dependency-free and lightweight (vanilla HTML/JS/CSS).
-

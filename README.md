@@ -5,8 +5,9 @@ A **lightweight web chat UI for the real antigravity (`agy`) CLI**. Simple, resp
 ## What it does
 
 - Serves a minimal single-page chat at `/`.
-- `POST /api/chat` — SSE stream of assistant replies using `agy --print --output-format stream-json --dangerously-skip-permissions`.
+- `POST /api/chat` — SSE stream of assistant replies using `agy` print mode with the prompt attached to `-p=` so CLI flags are parsed correctly.
 - **Token-Level Streaming**: NDJSON stream parsing delivers word-by-word token deltas in real-time.
+- **Stream Controls**: The UI exposes live status, preserves tool/usage badges, and can stop an in-flight response.
 - **Stateful Conversations**: Preserves session state and conversation IDs across turns and browser refreshes (`localStorage` & `.antigravity_conversations.json`).
 - **Tool & Usage Metrics**: Visual badges for active tool calls and token usage statistics (`input_tokens` / `output_tokens`).
 - `GET /api/models` — live model list from `agy models` (populates the picker).
@@ -27,6 +28,9 @@ A **lightweight web chat UI for the real antigravity (`agy`) CLI**. Simple, resp
 | `AGY_TIMEOUT` | `300` | Max seconds per turn |
 | `AGY_SANDBOX` | `0` | Set `1` to run agy in `--sandbox` (recommended if exposed publicly) |
 | `AGY_OUTPUT_FORMAT` | `stream-json` | Output format for agy (`stream-json` or `text`) |
+| `AGY_DISABLE_MCP` | `false` | Disable every MCP server for chat subprocesses when set to `true` |
+| `AGY_DISABLED_MCP_SERVERS` | empty | Optional comma-separated MCP server names excluded from chat subprocesses |
+| `AGY_RUNTIME_HOME` | `./scratch/.agy-home` | Ephemeral HOME used for the filtered agy subprocess config |
 | `AGY_PERSIST_CONVERSATIONS` | `true` | Enable conversation persistence across turns |
 | `AGY_CONVERSATIONS_FILE` | `.antigravity_conversations.json` | JSON file storing user conversation mappings |
 | `AGY_SCRATCH` | `./scratch` | Neutral cwd for agy (keeps unrelated repos out of context) |
@@ -35,7 +39,7 @@ A **lightweight web chat UI for the real antigravity (`agy`) CLI**. Simple, resp
 
 You can optionally run `antigravity-chat` as a persistent background service managed by `systemd`.
 
-An example service file is provided in [`antigravity-chat.service.example`](file:///home/ericmaster/agentic/antigravity-chat/antigravity-chat.service.example).
+An example service file is provided in [`antigravity-chat.service.example`](antigravity-chat.service.example).
 
 ### Setup as a User Service
 
@@ -70,5 +74,3 @@ An example service file is provided in [`antigravity-chat.service.example`](file
 ## License
 
 This project is open source and available under the [MIT License](LICENSE).
-
-
