@@ -27,8 +27,10 @@ Repository guidelines and instructions for AI coding agents.
 
 ## Documentation lifecycle
 
-Keep specs and other non-ADR docs current-state only; do not use them as changelogs, timelines,
-release notes, or historical change logs. Before release, ADRs may be edited, merged, or
-squashed to retain the latest decision; after release, preserve published ADRs and record later
-decisions in a new superseding ADR. Apply the `context-hygiene` skill before documentation or
-spec writes; link each fact to its SSOT instead of duplicating it.
+Keep specs and non-ADR docs current-state only, except `CHANGELOG.md`, the release-history SSOT.
+Collect pending changes under `[Unreleased]`, preserve published release entries, and group them
+by actual version and release date; never invent prior releases. ADRs own decision rationale:
+before release they may be edited, merged, or squashed; after release preserve published ADRs
+and record later decisions in a new ADR with `supersedes`. Apply `context-hygiene` before
+documentation or spec writes; link to the owning SSOT rather than duplicating it. Git and Plane
+own commit and work-item detail.
