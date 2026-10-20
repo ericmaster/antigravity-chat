@@ -24,3 +24,11 @@ Repository guidelines and instructions for AI coding agents.
 - Keep the architecture simple and database-free.
 - Maintain compatibility for OpenAI-style endpoints (`/v1/chat/completions`, `/v1/models`).
 - Ensure frontend assets in `static/` remain dependency-free and lightweight (vanilla HTML/JS/CSS).
+
+## Documentation lifecycle
+
+Keep specs and other non-ADR docs current-state only; do not use them as changelogs, timelines,
+release notes, or historical change logs. Before release, ADRs may be edited, merged, or
+squashed to retain the latest decision; after release, preserve published ADRs and record later
+decisions in a new superseding ADR. Apply the `context-hygiene` skill before documentation or
+spec writes; link each fact to its SSOT instead of duplicating it.
