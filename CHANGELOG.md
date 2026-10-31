@@ -5,6 +5,13 @@ Do not invent prior releases or dates.
 
 ## [Unreleased]
 
+### Fixed
+
+- Recognize agy `finished_reason` in stream results so timeouts, interruption and errors cannot masquerade as successful complete answers.
+- Persist conversation IDs received in terminal results, including streams ending without a newline.
+
 ### Changed
 
+- Treat web prompts as literal text by disabling CLI slash-command and skill expansion.
+- Document the agy 1.4.12 integration contract and add credential-free subprocess/SSE/OpenAI regression tests.
 - Establish release-history ownership in `CHANGELOG.md`, current-state documentation, and pre-release/post-release ADR rules.

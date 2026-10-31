@@ -4,6 +4,8 @@ Self-contained FastAPI app. It shells `agy --print` headlessly using `--output-f
 and streams real-time token events to a lightweight web UI, supporting stateful conversations.
 
 This is NOT the OpenRouter proxy on :3120 — it talks to the real antigravity CLI.
+
+Spec: docs/specs/agy-integration.md (CLI invocation and streaming integration).
 """
 
 from __future__ import annotations
@@ -355,7 +357,8 @@ def _build_argv(
 ) -> list[str]:
     # agy treats the token after -p as its prompt, even when that token is a flag.
     # Attach the prompt to -p so permission and output flags cannot be swallowed.
-    argv = [AGY_BIN, "--dangerously-skip-permissions"]
+    # Spec: docs/specs/agy-integration.md
+    argv = [AGY_BIN, "--dangerously-skip-permissions", "--disable-slash-commands"]
     if AGY_OUTPUT_FORMAT:
         argv += ["--output-format", AGY_OUTPUT_FORMAT]
     if AGY_SANDBOX:
@@ -434,6 +437,7 @@ def _agy_environment() -> dict[str, str]:
 
 
 def _parse_ndjson_line(line_str: str) -> list[dict]:
+    # Spec: docs/specs/agy-integration.md
     events: list[dict] = []
     line_clean = line_str.strip()
     if not line_clean:
@@ -444,6 +448,7 @@ def _parse_ndjson_line(line_str: str) -> list[dict]:
             return [{"event": "delta", "delta": str(obj)}]
 
         def parse_tool(payload: dict) -> dict:
+            # Spec: via _parse_ndjson_line
             tool_info = payload.get("tool_info")
             tool_name = payload.get("tool_name") or payload.get("tool") or payload.get("name")
             args = payload.get("args") or payload.get("input")
@@ -499,13 +504,19 @@ def _parse_ndjson_line(line_str: str) -> list[dict]:
             response = res.get("response")
             cid = res.get("conversation_id") or obj.get("conversation_id")
             result_event = {"event": "result", "usage": usage, "status": status}
+            finished_reason = res.get("finished_reason") or obj.get("finished_reason")
+            if finished_reason:
+                result_event["finished_reason"] = finished_reason
             if response:
                 result_event["response"] = str(response)
             if cid:
                 result_event["conversation_id"] = cid
             events.append(result_event)
-            if str(status).upper() not in ("SUCCESS", "COMPLETED", "OK"):
-                error = res.get("error") or obj.get("error") or res.get("response")
+            if finished_reason or str(status).upper() not in ("SUCCESS", "COMPLETED", "OK"):
+                error = res.get("error") or obj.get("error")
+                if not error and finished_reason:
+                    error = f"agy turn ended early: {finished_reason} (response may be incomplete)"
+                error = error or res.get("response")
                 if error:
                     events.append({"event": "error", "error": str(error)})
 
@@ -530,6 +541,7 @@ async def _stream_agy(
     user_id: str = "default",
 ):
     """Run agy and yield structured events (dict) as NDJSON or text chunks arrive."""
+    # Spec: docs/specs/agy-integration.md
     target_cwd = _within_allowed(cwd) if cwd else None
     if not target_cwd:
         target_cwd = str(SCRATCH)
@@ -559,6 +571,7 @@ async def _stream_agy(
     deadline = asyncio.get_running_loop().time() + AGY_TIMEOUT if AGY_TIMEOUT > 0 else None
 
     async def _drain_stderr() -> None:
+        # Spec: via _stream_agy
         # Must keep reading stderr concurrently with stdout — if the child fills the
         # pipe buffer and no one reads it, the child blocks on write() and the whole
         # process (including stdout) deadlocks.
@@ -573,6 +586,7 @@ async def _stream_agy(
     stderr_task = asyncio.create_task(_drain_stderr())
 
     async def _reap_process() -> None:
+        # Spec: via _stream_agy
         if proc.returncode is None:
             try:
                 proc.kill()
@@ -604,7 +618,7 @@ async def _stream_agy(
                 for line in lines:
                     parsed_events = _parse_ndjson_line(line)
                     for ev in parsed_events:
-                        if ev.get("event") == "init" and ev.get("conversation_id") and AGY_PERSIST_CONVERSATIONS:
+                        if ev.get("event") in ("init", "result") and ev.get("conversation_id") and AGY_PERSIST_CONVERSATIONS:
                             await save_conversation_async(user_id, ev["conversation_id"])
                         yield ev
             else:
@@ -618,7 +632,7 @@ async def _stream_agy(
             if AGY_OUTPUT_FORMAT.strip().lower() == "stream-json":
                 parsed_events = _parse_ndjson_line(buffered_line)
                 for ev in parsed_events:
-                    if ev.get("event") == "init" and ev.get("conversation_id") and AGY_PERSIST_CONVERSATIONS:
+                    if ev.get("event") in ("init", "result") and ev.get("conversation_id") and AGY_PERSIST_CONVERSATIONS:
                         await save_conversation_async(user_id, ev["conversation_id"])
                     yield ev
             else:

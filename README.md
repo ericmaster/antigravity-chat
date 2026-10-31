@@ -67,6 +67,9 @@ An example service file is provided in [`antigravity-chat.service.example`](anti
 
 ## Notes / limits
 
+- Target CLI: agy `1.4.12`. See the [integration contract and checks](docs/specs/agy-integration.md) for compatibility and the official release sources.
+- Web prompts are literal text; CLI slash commands and skill expansion are disabled.
+- Early-ended JSON results preserve partial text and report an error rather than pretending the answer completed.
 - Real-time token streaming is enabled when `AGY_OUTPUT_FORMAT=stream-json`.
 - Per-turn latency is whatever `agy` takes (subprocess + model). Pick a `(Low)` Flash model for maximum speed.
 - Uses your antigravity subscription/quota — no API keys needed.
