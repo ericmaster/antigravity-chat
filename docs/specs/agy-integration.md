@@ -24,12 +24,24 @@ when persistence is enabled, including a result at EOF without a newline.
 model IDs and names as supplied by the CLI, without downgrading selections or
 assuming unsupported JSON flags.
 
+## Browser history
+
+The browser saves its current transcript in localStorage after each completed,
+stopped or failed request and restores it synchronously on refresh. Restore only
+when both browser user ID and active conversation ID match (including a URL `cid`);
+this is browser-owned display history, not a server history API. New chat removes
+the snapshot, including when cancelling an active response. Keep message content,
+tool/usage badges and error/cancellation text; do not change model selection or
+session continuation. Malformed or unavailable storage must not break the UI.
+
 ## Verification
 
 Run `python -m unittest discover -s tests -v` and `python -m unittest test_app -v`
 in an environment with the application's existing FastAPI dependencies. Set
 `AGY_SCRATCH` and `AGY_CONVERSATIONS_FILE` outside the checkout before importing
-`app`. Tests use synthetic CLI events and no credentials or model calls.
+`app`. Tests use synthetic CLI events and no credentials or model calls. Run
+`node --test tests/test_browser_history.cjs` for browser-state regressions using
+Node's built-in VM and DOM stubs; no frontend dependencies are required.
 
 For release E2E, verify a real model list, a streamed response, continuation
 through refresh, stop, and a deliberate timeout in the browser. A normal reply

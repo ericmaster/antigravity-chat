@@ -806,6 +806,35 @@
     }
     let fsModalPath = "", fsModalEntries = [], fsModalUp = null, pickerReturnFocus = null;
 
+    // Spec: docs/specs/agy-integration.md
+    function saveHistory() {
+      try {
+        if (messages.length) {
+          localStorage.setItem("agy_chat_history", JSON.stringify({ userId, conversationId: currentConversationId, messages }));
+        } else {
+          localStorage.removeItem("agy_chat_history");
+        }
+      } catch {
+        // Storage may be unavailable or full; do not break streaming or Stop.
+      }
+    }
+
+    // Spec: docs/specs/agy-integration.md
+    function restoreHistory() {
+      try {
+        const saved = JSON.parse(localStorage.getItem("agy_chat_history"));
+        if (saved && saved.userId === userId && saved.conversationId === currentConversationId &&
+            Array.isArray(saved.messages) && saved.messages.every(m => m &&
+              ["user", "assistant"].includes(m.role) && typeof m.content === "string" &&
+              [m.tool, m.metrics].every(value => value == null || typeof value === "string"))) {
+          messages = saved.messages;
+          render(true);
+        }
+      } catch {
+        // Ignore malformed or unavailable browser storage.
+      }
+    }
+
     function updateConversationPill() {
       if (currentConversationId) {
         cidLabel.textContent = currentConversationId.length > 12
@@ -1163,6 +1192,7 @@
         activeController = null;
         busy = false;
         updateComposer();
+        saveHistory();
         if (assistant.status === "complete") setStatus("Ready · streaming via agy", "ready");
         render();
         input.focus();
@@ -1177,6 +1207,7 @@
       if (busy) stop();
       messages = [];
       currentConversationId = null;
+      saveHistory();
       localStorage.removeItem("agy_conversation_id");
       updateConversationPill();
       fetch("/api/conversations?user_id=" + encodeURIComponent(userId), { method: "DELETE" }).catch(() => {});
@@ -1194,6 +1225,7 @@
     });
     $("#clear").onclick = clearChat;
 
+    restoreHistory();
     loadModels();
     input.focus();
   </script>

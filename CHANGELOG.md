@@ -7,6 +7,7 @@ Do not invent prior releases or dates.
 
 ### Fixed
 
+- Restore the browser-owned transcript after refresh, including stopped/error text; New chat removes it without changing model selection or agy session behavior.
 - Recognize agy `finished_reason` in stream results so timeouts, interruption and errors cannot masquerade as successful complete answers.
 - Persist conversation IDs received in terminal results, including streams ending without a newline.
 
