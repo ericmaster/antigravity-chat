@@ -34,6 +34,26 @@ the snapshot, including when cancelling an active response. Keep message content
 tool/usage badges and error/cancellation text; do not change model selection or
 session continuation. Malformed or unavailable storage must not break the UI.
 
+## Header and composer UI
+
+The header keeps its logo/status and workspace, session, model and New chat controls,
+but no visible product-name text. Preserve the browser document title and empty-state
+copy. Header actions wrap within their available width; long workspace/session labels
+truncate without covering another control.
+
+`#send` is a fixed-size up-arrow icon button, labelled and titled `Send`. During a
+request the same button shows a stop square, labelled and titled `Stop`, and cancels
+the active response. Keep Enter/Shift+Enter behavior and keyboard focus indicators.
+The textarea shrinks within the composer; growing text must not stretch the icon.
+
+Verify header/composer geometry at 320, 360, 390, 768 and 1280 CSS pixels and at
+419/420/421 and 639/640/641 around both existing mobile breakpoints. Include long
+workspace, conversation ID and multiline composer fixtures. Require no page horizontal
+overflow, overlapping or covered controls, or controls outside the viewport.
+`tests/test_ui_geometry.cjs` exports the authenticated real-browser assertions; use
+the normal isolated-browser E2E flow, including actual send/stop and session reload.
+Label local HTML response substitution as candidate QA, not deployed verification.
+
 ## Verification
 
 Run `python -m unittest discover -s tests -v` and `python -m unittest test_app -v`

@@ -10,7 +10,8 @@ const source = readFileSync(require('node:path').join(__dirname, '../static/inde
 function boot(storage = new Map(), search = '') {
   const nodes = new Map();
   const element = () => ({style: {}, dataset: {}, value: '', content: '', children: [],
-    classList: {toggle() {}, add() {}, remove() {}}, addEventListener() {}, setAttribute() {},
+    classList: {toggle() {}, add() {}, remove() {}}, addEventListener() {},
+    setAttribute(key, value) {this[key] = value;},
     appendChild(child) {this.children.push(child);}, querySelector() {return null;}, focus() {},
     innerHTML: '', textContent: '', scrollHeight: 0, scrollTop: 0, clientHeight: 0});
   const sandbox = {URL, URLSearchParams, AbortController, TextDecoder, console, setTimeout,
@@ -24,6 +25,26 @@ function boot(storage = new Map(), search = '') {
   vm.runInContext(source, context);
   return {storage, nodes, run: code => vm.runInContext(code, context), context};
 }
+
+// Spec: docs/specs/agy-integration.md
+test('icon composer preserves markup and accessible names while cancelling a real pending send', async () => {
+  const page = boot();
+  const button = page.nodes.get('#send');
+  button.innerHTML = '<svg>preserved icon</svg>';
+  page.context.fetch = (_, options) => new Promise((resolve, reject) => options.signal.addEventListener('abort', () => {
+    const error = new Error('Cancelled'); error.name = 'AbortError'; reject(error);
+  }));
+  const pending = page.run("input.value = 'Cancel'; send()");
+  assert.equal(button['aria-label'], 'Stop');
+  assert.equal(button.title, 'Stop');
+  assert.equal(button.disabled, false);
+  page.run('sendBtn.onclick()');
+  await pending;
+  assert.equal(button['aria-label'], 'Send');
+  assert.equal(button.title, 'Send');
+  assert.equal(button.innerHTML, '<svg>preserved icon</svg>');
+  assert.equal(page.run('messages[1].status'), 'stopped');
+});
 
 // Spec: docs/specs/agy-integration.md
 test('completed transcript restores synchronously with metadata and matching session', async () => {

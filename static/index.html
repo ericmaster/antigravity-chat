@@ -68,6 +68,9 @@
       gap: 8px;
       min-width: 0;
       margin-left: auto;
+      flex: 1;
+      flex-wrap: wrap;
+      justify-content: flex-end;
     }
 
     .brand {
@@ -83,14 +86,6 @@
       border-radius: 6px;
       display: block;
       flex-shrink: 0;
-    }
-
-    header h1 {
-      font-size: 15px;
-      margin: 0;
-      font-weight: 600;
-      letter-spacing: .2px;
-      white-space: nowrap;
     }
 
     header .dot {
@@ -280,6 +275,7 @@
 
     textarea {
       flex: 1;
+      min-width: 0;
       resize: none;
       background: var(--bg);
       color: var(--text);
@@ -303,13 +299,23 @@
       color: #0b0e16;
       border: none;
       border-radius: 10px;
-      padding: 0 18px;
+      padding: 0;
+      display: grid;
+      place-items: center;
+      flex: 0 0 48px;
+      width: 48px;
+      height: 48px;
+      align-self: flex-end;
       font-weight: 600;
       cursor: pointer;
       font-size: 14px;
-      min-width: 68px;
+      min-width: 48px;
       transition: background .2s ease, opacity .2s ease;
     }
+
+    .send svg { width: 24px; height: 24px; }
+    .send .stop-icon, .send.stop .send-icon { display: none; }
+    .send.stop .stop-icon { display: block; }
 
     .send.stop {
       background: var(--danger);
@@ -381,6 +387,13 @@
       overflow: hidden;
       white-space: nowrap;
       text-overflow: ellipsis;
+    }
+
+    #ws-label, #cid-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .ws-btn:hover {
@@ -601,10 +614,6 @@
         height: 24px;
       }
 
-      header h1 {
-        font-size: 14px;
-      }
-
       .ws-btn {
         max-width: 110px;
         font-size: 12px;
@@ -648,7 +657,7 @@
       }
 
       .send {
-        padding: 0 14px;
+        padding: 0;
         font-size: 13px;
         min-height: 48px;
       }
@@ -690,9 +699,6 @@
     }
 
     @media (max-width: 420px) {
-      header h1 {
-        display: none;
-      }
       .ws-btn {
         max-width: 76px;
       }
@@ -736,7 +742,6 @@
     <div class="brand">
       <img src="/static/logo.png" alt="Antigravity Logo" class="brand-logo" />
       <span id="status-dot" class="dot" title="Status: Ready"></span>
-      <h1>Antigravity Chat</h1>
     </div>
     <div class="header-actions">
       <button id="cid-btn" class="cid-btn" style="display:none;" title="Active Conversation ID" aria-label="Active conversation">💬 <span id="cid-label"></span></button>
@@ -764,7 +769,10 @@
     <div class="composer">
       <label class="sr-only" for="input">Message</label>
       <textarea id="input" aria-describedby="hint" placeholder="Message antigravity…  (Enter to send, Shift+Enter for newline)"></textarea>
-      <button class="send" id="send" type="button">Send</button>
+      <button class="send" id="send" type="button" aria-label="Send" title="Send">
+        <svg class="send-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 19V5m-7 7 7-7 7 7" /></svg>
+        <svg class="stop-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
+      </button>
     </div>
     <div class="hint" id="hint" data-state="ready" role="status" aria-live="polite">Ready · streaming via agy</div>
   </footer>
@@ -1043,10 +1051,11 @@
       modelSel.style.display = "";
     }
 
+    // Spec: docs/specs/agy-integration.md
     function updateComposer() {
-      sendBtn.textContent = busy ? "Stop" : "Send";
+      sendBtn.title = busy ? "Stop" : "Send";
       sendBtn.classList.toggle("stop", busy);
-      sendBtn.setAttribute("aria-label", busy ? "Stop response" : "Send message");
+      sendBtn.setAttribute("aria-label", busy ? "Stop" : "Send");
       sendBtn.disabled = false;
     }
 
